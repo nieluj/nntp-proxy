@@ -33,9 +33,29 @@
 #include <openssl/rand.h>
 #include <openssl/engine.h>
 
-/* These two values must be changed */
+struct user_info {
+    char *username;
+    char *password;
+    int max_conns;
+};
+
+/** Configuration part **/
+
+/* Username needed to establish the connection to the NNTP server */
 #define SERVER_USER "FIXME"
+/* Password associated to username */
 #define SERVER_PASS "FIXME"
+/* Maximum number of connections allowed by the NNTP */
+#define MAX_CONNS 20
+
+/* Login / passwords for the client side of the proxy, the password is generated with  'mkpasswd -m sha-512' */
+/* The last field is the number of allowed connections for this user */
+struct user_info users[] = {
+    { "foo", "$6$aBUzpyBd$TNZv2jzHtARuoUPQmVjxRSHBZPKniMuZIUzAAd8Ob1c5pzcExsTDfA9zCF.sN8pmZL0Cb48FW/7iEtang7wBg/", 1 },
+    { NULL, NULL, 0 }
+};
+
+/** end of configuration **/
 
 #define NNTP_SERVICE_READY 200
 #define NNTP_AUTH_ACCEPTED 281
@@ -60,7 +80,6 @@
 #define INFO(fmt, ...)    PRINT_MSG(INFO_LEVEL, fmt, ## __VA_ARGS__)
 #define DEBUG(fmt, ...)   PRINT_MSG(DEBUG_LEVEL, fmt, ## __VA_ARGS__)
 
-#define MAX_CONNS 20
 #define MAX_CMD_ARGS 32
 
 #define PARTNER_BEV(bev, conn) (bev == conn->server_bev) ? conn->client_bev : conn->server_bev
@@ -95,18 +114,6 @@ struct conn_desc {
 };
 
 static struct conn_desc *connections;
-
-struct user_info {
-    char *username;
-    char *password;
-    int max_conns;
-};
-
-// mkpasswd -m sha-512
-struct user_info users[] = {
-    { "foo", "$6$aBUzpyBd$TNZv2jzHtARuoUPQmVjxRSHBZPKniMuZIUzAAd8Ob1c5pzcExsTDfA9zCF.sN8pmZL0Cb48FW/7iEtang7wBg/", 1 },
-    { NULL, NULL, 0 }
-};
 
 static int verbose_level = ERROR_LEVEL;
 
