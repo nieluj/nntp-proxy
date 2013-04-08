@@ -40,6 +40,8 @@ struct user_info {
     int max_conns;
 };
 
+struct config_t cfg;
+
 /** Configuration part **/
 
 /* Username needed to establish the connection to the NNTP server */
@@ -522,6 +524,41 @@ static void common_readcb(struct bufferevent *bev, void *arg)
     }
 }
 
+static int load_config()
+{
+  char *file = "/root/dev/nntp-proxy/nntp-proxy.conf"; // TODO: allow variable config filename as parameter
+  /* Initialize the configuration */
+  config_init(&cfg);
+  if(!config_read_file(&cfg, file))
+  {
+    DEBUG("Failed to read config file: %s\n", file);
+    exit(1);
+  }
+  else
+  {
+    config_setting_t *setting_max_connections, *setting_username, *setting_password = NULL;
+    setting_max_connections = config_lookup(&cfg, "upstream.max_connections");
+    setting_username = config_lookup(&cfg, "upstream.username");
+    setting_password = config_lookup(&cfg, "upstream.password");
+
+    if(!setting_max_connections || !setting_username || !setting_password)
+      DEBUG("something went wrong, is the config file well formed?\n");
+    else
+    {
+      int max_conns = config_setting_get_int(setting_max_connections);
+      const char *username = config_setting_get_string(setting_username);
+      const char *password = config_setting_get_string(setting_password);
+      DEBUG("loaded settings from file, max_conns: %i\tusername: %s\tpassword: %s\n", max_conns, username, password);
+    }
+
+
+
+  }
+  /* Free the configuration */
+  config_destroy(&cfg);
+  return 0;
+}
+
 static int authenticate(const char *username, const char *password)
 {
     struct user_info *user;
@@ -851,6 +888,9 @@ int main(int argc, char **argv)
 	syntax(argv[0]);
 
     verbose_level = DEBUG_LEVEL;
+
+    INFO("Loading configuration file ...\n"); 
+    load_config();
 
     INFO("Starting proxy ...\n"); 
 
