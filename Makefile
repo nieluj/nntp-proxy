@@ -7,8 +7,8 @@ OBJECTS = $(SOURCES:.c=.o)
 
 EXECUTABLE = nntp-proxy
 
-CFLAGS  += `pkg-config --cflags libevent_openssl openssl`
-LDFLAGS += `pkg-config --libs libevent_openssl openssl`
+CFLAGS  += `pkg-config --cflags libevent_openssl openssl libconfig`
+LDFLAGS += `pkg-config --libs libevent_openssl openssl libconfig`
 
 all: $(SOURCES) $(EXECUTABLE)
 
