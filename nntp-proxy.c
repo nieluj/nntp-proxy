@@ -20,6 +20,7 @@
 #include <crypt.h>
 #include <sys/time.h>
 #include <time.h>
+#include <libconfig.h>
 
 #include <event2/dns.h>
 #include <event2/bufferevent_ssl.h>
