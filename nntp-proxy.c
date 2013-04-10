@@ -531,7 +531,7 @@ static int load_config()
   config_init(&cfg);
   if(!config_read_file(&cfg, file))
   {
-    DEBUG("Failed to read config file: %s\n", file);
+    DEBUG("Failed to read config file: %s\tIs it well formed?", file);
     exit(1);
   }
   else
@@ -542,7 +542,10 @@ static int load_config()
     setting_password = config_lookup(&cfg, "upstream.password");
 
     if(!setting_max_connections || !setting_username || !setting_password)
-      DEBUG("something went wrong, is the config file well formed?\n");
+    {
+      DEBUG("Something went wrong while reading the config file! Are all required fields available?\n");
+      exit(EXIT_FAILURE);
+    }
     else
     {
       int max_conns = config_setting_get_int(setting_max_connections);
