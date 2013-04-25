@@ -17,7 +17,12 @@
 #include <string.h>
 #include <errno.h>
 #include <arpa/inet.h>
+#ifdef __APPLE__
+#include <unistd.h>
+#else
 #include <crypt.h>
+#endif
+
 #include <sys/time.h>
 #include <time.h>
 #include <libconfig.h>

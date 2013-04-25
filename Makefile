@@ -1,6 +1,11 @@
+UNAME_S := $(shell uname -s)
+
 CC = gcc
 CFLAGS = -g -c -Wall
-LDFLAGS = -lcrypt 
+
+ifeq ($(UNAME_S),Linux)
+  LDFLAGS = -lcrypt 
+endif
 
 SOURCES = nntp-proxy.c
 OBJECTS = $(SOURCES:.c=.o)
