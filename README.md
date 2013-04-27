@@ -4,38 +4,83 @@ simple NNTP proxy with SSL support. If a padlock engine is available, it will be
 
 ## Configuration
 
-For the time being, the configuration data is directly in the source file `nntp-proxy.c`. Below is an example configuration :
+Below is an example of a configuration file :
 
-```C
-/** Configuration part **/
+```
+##################################
+#
+# nntp-proxy configuration
+#
+##################################
 
-/* Username needed to establish the connection to the NNTP server */
-#define SERVER_USER "FIXME"
-/* Password associated to username */
-#define SERVER_PASS "FIXME"
-/* Maximum number of connections allowed by the NNTP */
-#define MAX_CONNS 20
-
-/* Login / passwords for the client side of the proxy, the password is generated with  'mkpasswd -m sha-512' */
-/* The last field is the number of allowed connections for this user */
-struct user_info users[] = {
-    { "foo", "$6$aBUzpyBd$TNZv2jzHtARuoUPQmVjxRSHBZPKniMuZIUzAAd8Ob1c5pzcExsTDfA9zCF.sN8pmZL0Cb48FW/7iEtang7wBg/", 1 },
-    { NULL, NULL, 0 }
+nntp_server:
+{
+    # NNTP Server host and port address
+    server = "ssl-eu.astraweb.com";
+    port = 563;
+    # NNTP username
+    username = "changeme";
+    # NNTP password in clear text
+    password = "changeme";
+    # Maximum number of connections allowed by the NNTP
+    max_connections = 20;
 };
 
-/** end of configuration **/
+proxy:
+{
+    #Local address and port to bind to
+    bind_ip = "0.0.0.0";
+    port = 5555;
+
+    # SSL key and cert file
+    ssl_key = "key.pem";
+    ssl_cert = "cert.pem";
+
+    # Verbose levels: ERROR, WARNING, NOTICE, INFO, DEBUG
+    verbose = "INFO";
+
+    # Password is made with: 'mkpasswd -m sha-512 <password>'
+    # mkpasswd is found in whois package on Debian-based systems
+    users = (
+        {
+            # Username of the client side of the proxy
+            username = "tarzan";
+            # Password: monkey
+            password = "$6$Ds77DJE/u/ScJLk$Tj0SaT7AUDdDBqS7v/4uDYGYWDDH3GWSL0KP6FQKk7anC5Cghi5IJUYzIAxJZ8rFgyeFmosPSEyQRL.slG5ST1";
+            # the number of allowed connections for this user
+            max_connections = 1;
+        },
+        {
+            # Username of the client side of the proxy
+            username = "jane";
+            # Password: king
+            password = "$6$xvOO3Cm97/O6yj$a6GmSiz9yWCibWcetxJQ.c4cIOUbXly.3i1p/oCqdGo47TezmChb0tSeIxmvD.2zrb/lywc4vtl/IKLBoqMXs1";
+            # the number of allowed connections for this user
+            max_connections = 1;
+        }
+    );
+};
 ```
 
-Obviously, the program needs to be recompiled after modifying these values.
+
 
 ## Installation
 
+TODO
+
 ### Compilation
 
-The program relies on ``libevent`` (version 2) with openssl support. On Debian-based systems, the dependencies can be installed with the following command line :
+The program relies on ``libevent`` (version 2) with openssl support and libconfig. On Debian-based systems, the dependencies can be installed with the following command line :
 
 ```sh
-$ sudo apt-get install libssl-dev libevent-dev 
+$ sudo apt-get install libssl-dev libevent-dev libconfig-dev
+```
+
+On Mac OS X
+
+```sh
+$ brew install openssl libevent libconfig pkg-config
+$ brew link --force openssl
 ```
 
 The provided `Makefile` can be used to compile the program.
@@ -53,11 +98,8 @@ $ openssl x509 -req -days 365 -in cert.req -signkey key.pem -out cert.pem
 
 ## Usage
 
-The program accepts the following arguments:
+`nntp-proxy [<config file>]`
 
-  * `keypath` : the path to the private key file
-  * `certpath` : the path to the certificate file
-  * `listen-on-addr` : the local address and port to bind to 
-  * `connect-to-addr` : the NNTP server address to connect to
+  * `config file` : Configuration file (See nntp-proxy.conf.example)
 
-Example : `$ nntp-proxy key.pem cert.pem 0.0.0.0:563 ssl-eu.astraweb.com:443`
+Example : `$ nntp-proxy nntp-proxy.conf`

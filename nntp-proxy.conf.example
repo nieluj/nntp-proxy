@@ -1,0 +1,41 @@
+##################################
+#
+# nntp-proxy configuration
+#
+##################################
+
+nntp_server:
+{
+    server = "ssl-eu.astraweb.com";
+    port = 563;
+    username = "changeme";
+    password = "changeme";
+    max_connections = 20;
+};
+
+proxy:
+{
+    bind_ip = "0.0.0.0";
+    bind_port = 5555;
+    ssl_key = "key.pem";
+    ssl_cert = "cert.pem";
+    # Verbose levels: ERROR, WARNING, NOTICE, INFO, DEBUG
+    verbose = "INFO";
+
+    # Password is made with: 'mkpasswd -m sha-512 <password>'
+    # mkpasswd is found in whois package on Debian-based systems
+    users = (
+        {
+            username = "tarzan";
+            # Password: monkey
+            password = "$6$Ds77DJE/u/ScJLk$Tj0SaT7AUDdDBqS7v/4uDYGYWDDH3GWSL0KP6FQKk7anC5Cghi5IJUYzIAxJZ8rFgyeFmosPSEyQRL.slG5ST1";
+            max_connections = 1;
+        },
+        {
+            username = "jane";
+            # Password: king
+            password = "$6$xvOO3Cm97/O6yj$a6GmSiz9yWCibWcetxJQ.c4cIOUbXly.3i1p/oCqdGo47TezmChb0tSeIxmvD.2zrb/lywc4vtl/IKLBoqMXs1";
+            max_connections = 1;
+        }
+    );
+};

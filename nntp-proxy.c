@@ -17,9 +17,16 @@
 #include <string.h>
 #include <errno.h>
 #include <arpa/inet.h>
+
+#ifdef __APPLE__
+#include <unistd.h>
+#else
 #include <crypt.h>
+#endif
+
 #include <sys/time.h>
 #include <time.h>
+#include <libconfig.h>
 
 #include <event2/dns.h>
 #include <event2/bufferevent_ssl.h>
@@ -33,27 +40,37 @@
 #include <openssl/rand.h>
 #include <openssl/engine.h>
 
-struct user_info {
-    char *username;
-    char *password;
+struct server_info {
+    const char *server;
+    int port;
+    const char *username;
+    const char *password;
     int max_conns;
 };
 
+struct user_info {
+    const char *username;
+    const char *password;
+    int max_conns;
+};
+
+struct proxy_info {
+    const char *bind_ip;
+    int port;
+    const char *ssl_key;
+    const char *ssl_cert;
+};
+
+int user_count = 0;
+struct user_info *users;
+
+struct config_t cfg;
+
 /** Configuration part **/
 
-/* Username needed to establish the connection to the NNTP server */
-#define SERVER_USER "FIXME"
-/* Password associated to username */
-#define SERVER_PASS "FIXME"
-/* Maximum number of connections allowed by the NNTP */
-#define MAX_CONNS 20
+struct server_info nntp_server;
 
-/* Login / passwords for the client side of the proxy, the password is generated with  'mkpasswd -m sha-512' */
-/* The last field is the number of allowed connections for this user */
-struct user_info users[] = {
-    { "foo", "$6$aBUzpyBd$TNZv2jzHtARuoUPQmVjxRSHBZPKniMuZIUzAAd8Ob1c5pzcExsTDfA9zCF.sN8pmZL0Cb48FW/7iEtang7wBg/", 1 },
-    { NULL, NULL, 0 }
-};
+struct proxy_info proxy_server;
 
 /** end of configuration **/
 
@@ -121,8 +138,6 @@ static struct event_base *base;
 static struct evdns_base *dns_base;
 
 static struct sockaddr_storage listen_on_addr;
-static const char *server_hostname;
-static int server_port;
 
 /* proxy server-side */
 static SSL_CTX *ssl_server_ctx = NULL;
@@ -172,7 +187,7 @@ static struct conn_desc * get_next_conn(void)
     int i;
 
     ret = connections;
-    for (i = 0; i < MAX_CONNS; i++) {
+    for (i = 0; i < nntp_server.max_conns; i++) {
 	if (!ret->server_bev && !ret->client_bev) {
 	    ret->n = i;
 	    ret->bytes = 0;
@@ -208,7 +223,7 @@ static int allow_connection(const char *username)
     }
 
     conn = connections;
-    for (i = 0; i < MAX_CONNS; i++) {
+    for (i = 0; i < nntp_server.max_conns; i++) {
 	if (conn->client_username &&
 		!strcmp(conn->client_username, username)) {
 	    DEBUG("connection %d is used by user %s\n", conn->n, username);
@@ -304,12 +319,12 @@ static SSL_CTX * ssl_server_init(const char *keypath, const char *certpath)
 
     e = ENGINE_by_id("padlock");
     if (e) {
-	fprintf(stderr, "[*] Using padlock engine for default ciphers\n");
-	ENGINE_set_default_ciphers(ENGINE_by_id("padlock"));
-	use_padlock_engine = 1;
+        fprintf(stderr, "[*] Using padlock engine for default ciphers\n");
+        ENGINE_set_default_ciphers(ENGINE_by_id("padlock"));
+        use_padlock_engine = 1;
     } else {
-	fprintf(stderr, "[*] Padlock engine not available\n");
-	use_padlock_engine = 0;
+        fprintf(stderr, "[*] Padlock engine not available\n");
+        use_padlock_engine = 0;
     }
 
     SSL_load_error_strings();
@@ -485,40 +500,149 @@ static void common_readcb(struct bufferevent *bev, void *arg)
     dst = bufferevent_get_output(partner);
 
     if (conn->client_bev == bev) {
-	//DEBUG("client -> proxy: got %d bytes to read\n", len);
-	if (conn->bytes != 0) {
-	    struct timeval now;
-	    struct timeval tdiff;
-	    float sec_diff;
-	    gettimeofday(&now, NULL);
-	    timeval_subtract(&tdiff, &now, &conn->last_cmd);
-	    sec_diff = tdiff.tv_sec + (tdiff.tv_usec / 1000000.0);
-	    DEBUG("[%d] command finished, %d bytes transferred in %.2f seconds (%.2f kb/s)\n", conn->n, conn->bytes,
-		    sec_diff, (conn->bytes * 1.0 / 1024 ) / sec_diff);
-	}
-	cmd = evbuffer_readln(src, NULL, EVBUFFER_EOL_CRLF);
-	DEBUG("[%d] command from client: %s\n", conn->n, cmd);
-	evbuffer_add_printf(dst, "%s\r\n", cmd);
-	free(cmd);
-	conn->bytes = 0;
-	gettimeofday(&conn->last_cmd, NULL);
+        DEBUG("client -> proxy: got %d bytes to read\n", len);
+        if (conn->bytes != 0) {
+            struct timeval now;
+            struct timeval tdiff;
+            float sec_diff;
+            gettimeofday(&now, NULL);
+            timeval_subtract(&tdiff, &now, &conn->last_cmd);
+            sec_diff = tdiff.tv_sec + (tdiff.tv_usec / 1000000.0);
+            DEBUG("[%d] command finished, %d bytes transferred in %.2f seconds (%.2f kb/s)\n", conn->n, conn->bytes,
+                sec_diff, (conn->bytes * 1.0 / 1024 ) / sec_diff);
+        }
+        cmd = evbuffer_readln(src, NULL, EVBUFFER_EOL_CRLF);
+        if (cmd != NULL) {
+            DEBUG("[%d] command from client: %s\n", conn->n, cmd);
+            if (strcasestr(cmd, "AUTHINFO USER")) {
+	            evbuffer_add_printf(dst, "AUTHINFO USER %s\r\n", nntp_server.username);
+            } else if (strcasestr(cmd, "AUTHINFO PASS")) {
+	            evbuffer_add_printf(dst, "AUTHINFO PASS %s\r\n", nntp_server.password);
+            } else {
+                evbuffer_add_printf(dst, "%s\r\n", cmd);
+            }
+            free(cmd);
+            conn->bytes = 0;
+            gettimeofday(&conn->last_cmd, NULL);
+        } else {
+            DEBUG("[%d] command from client is empty??\n", conn->n);
+        }
     } else {
-	conn->bytes += len;
-	evbuffer_add_buffer(dst, src);
+        conn->bytes += len;
+        evbuffer_add_buffer(dst, src);
     }
 
     len = evbuffer_get_length(dst);
     if (len >= MAX_OUTPUT) {
-	/* We're giving the other side data faster than it can
-	 * pass it on.  Stop reading here until we have drained the
-	 * other side to MAX_OUTPUT/2 bytes. */
-	//WARNING("[%d] Client not fast enough (%d bytes in write buffer of %p), disabling read callbacks\n",
-	//	conn->n, len, partner);
+        /* We're giving the other side data faster than it can
+         * pass it on.  Stop reading here until we have drained the
+         * other side to MAX_OUTPUT/2 bytes. */
+        //WARNING("[%d] Client not fast enough (%d bytes in write buffer of %p), disabling read callbacks\n",
+        //	conn->n, len, partner);
 
-	bufferevent_setcb(partner, common_readcb, drained_writecb, eventcb, conn);
-	bufferevent_setwatermark(partner, EV_WRITE, MAX_OUTPUT/2, MAX_OUTPUT);
-	bufferevent_disable(bev, EV_READ);
+        bufferevent_setcb(partner, common_readcb, drained_writecb, eventcb, conn);
+        bufferevent_setwatermark(partner, EV_WRITE, MAX_OUTPUT/2, MAX_OUTPUT);
+        bufferevent_disable(bev, EV_READ);
     }
+}
+
+static int load_config(char *file)
+{
+  /* Initialize the configuration */
+  config_init(&cfg);
+  if(!config_read_file(&cfg, file))
+  {
+    ERROR("Failed to read config file: %s\tIs it well formed?\n", file);
+    exit(1);
+  }
+  else
+  {
+    config_setting_t *setting_max_connections, *setting_username, *setting_password, *setting_server, *setting_port = NULL;
+    config_setting_t *setting_proxy_bind_ip, *setting_proxy_port, *setting_proxy_users, *setting_proxy_ssl_key, *setting_proxy_ssl_cert, *setting_proxy_verbose = NULL;
+    setting_max_connections = config_lookup(&cfg, "nntp_server.max_connections");
+    setting_username = config_lookup(&cfg, "nntp_server.username");
+    setting_password = config_lookup(&cfg, "nntp_server.password");
+    setting_server = config_lookup(&cfg, "nntp_server.server");
+    setting_port = config_lookup(&cfg, "nntp_server.port");
+
+    setting_proxy_verbose = config_lookup(&cfg, "proxy.verbose");
+    setting_proxy_bind_ip = config_lookup(&cfg, "proxy.bind_ip");
+    setting_proxy_port = config_lookup(&cfg, "proxy.bind_port");
+    setting_proxy_ssl_key = config_lookup(&cfg, "proxy.ssl_key");
+    setting_proxy_ssl_cert = config_lookup(&cfg, "proxy.ssl_cert");
+    setting_proxy_users = config_lookup(&cfg, "proxy.users");
+
+    if(!setting_max_connections || !setting_username || !setting_password || !setting_server || !setting_port ||
+       !setting_proxy_bind_ip || !setting_proxy_port || !setting_proxy_ssl_key || !setting_proxy_ssl_cert || !setting_proxy_users) {
+      ERROR("Something went wrong while reading the config file! Are all required fields available?\n");
+      exit(EXIT_FAILURE);
+    } else {
+      if (setting_proxy_verbose) {
+        const char* level = config_setting_get_string(setting_proxy_verbose);
+        int invalidLevel = 0;
+        if (!strcmp(level, "ERROR")) {
+            verbose_level = ERROR_LEVEL;
+        } else if (!strcmp(level, "WARNING")) {
+            verbose_level = WARNING_LEVEL;
+        } else if (!strcmp(level, "NOTICE")) {
+            verbose_level = NOTICE_LEVEL;
+        } else if (!strcmp(level, "INFO")) {
+            verbose_level = INFO_LEVEL;
+        } else if (!strcmp(level, "DEBUG")) {
+            verbose_level = DEBUG_LEVEL;
+        } else {
+            ERROR("Invalid verbose level: %s\n", level);
+            invalidLevel = 1;
+        }
+        if (!invalidLevel)
+            DEBUG("Verbose level: %s\n", level);
+      }
+      nntp_server.server = strdup(config_setting_get_string(setting_server));
+      nntp_server.port = config_setting_get_int(setting_port);
+      nntp_server.max_conns = config_setting_get_int(setting_max_connections);
+      nntp_server.username = strdup(config_setting_get_string(setting_username));
+      nntp_server.password = strdup(config_setting_get_string(setting_password));
+
+      proxy_server.bind_ip = strdup(config_setting_get_string(setting_proxy_bind_ip));
+      proxy_server.port = config_setting_get_int(setting_proxy_port);
+      proxy_server.ssl_key = strdup(config_setting_get_string(setting_proxy_ssl_key));
+      proxy_server.ssl_cert = strdup(config_setting_get_string(setting_proxy_ssl_cert));
+
+      DEBUG("loaded settings from file...\nNNTP server: %s:%i\nmax_conns: %i\nusername: %s\npassword: %s\nProxy server: %s:%i\nSSL key: %s\nSSL cert: %s\n",
+        nntp_server.server, nntp_server.port,
+        nntp_server.max_conns, nntp_server.username, nntp_server.password,
+        proxy_server.bind_ip, proxy_server.port,
+        proxy_server.ssl_key, proxy_server.ssl_cert);
+
+      user_count = config_setting_length(setting_proxy_users);
+      DEBUG("Users: %i\n", user_count);
+      users = (struct user_info *) malloc(sizeof(struct user_info) * (user_count + 1));
+      int i;
+      for(i = 0; i < user_count; i++) {
+          config_setting_t *user = config_setting_get_elem(setting_proxy_users, i);
+          const char *username, *password;
+	      long int max_conns;
+
+	      if(!(config_setting_lookup_string(user, "username", &username)
+	           && config_setting_lookup_string(user, "password", &password)
+	           && config_setting_lookup_int(user, "max_connections", &max_conns)))
+	        continue;
+
+          DEBUG("Username: %s\tpassword: %s\tmax connections: %i\n", username, password, max_conns);
+
+          users[i].username = strdup(username);
+          users[i].password = strdup(password);
+          users[i].max_conns = max_conns;
+      }
+      users[i].username = NULL;
+      users[i].password = NULL;
+      users[i].max_conns = 0;
+
+    }
+  }
+  /* Free the configuration */
+  config_destroy(&cfg);
+  return 0;
 }
 
 static int authenticate(const char *username, const char *password)
@@ -555,10 +679,10 @@ static int connect_to_server(struct conn_desc *conn)
 	return -1;
     }
 
-    INFO("Connecting to %s port %d\n", server_hostname, server_port);
+    INFO("Connecting to %s port %d\n", nntp_server.server, nntp_server.port);
 
     if (bufferevent_socket_connect_hostname(conn->server_bev,
-		dns_base, AF_UNSPEC, server_hostname, server_port)) {
+		dns_base, AF_UNSPEC, nntp_server.server, nntp_server.port)) {
 	perror("bufferevent_socket_connect_hostname");
 	return -1;
     }
@@ -590,6 +714,11 @@ static void client_auth_readcb(struct bufferevent *bev, void *arg)
     DEBUG("client -> proxy: got %d bytes to read\n", len);
 
     cmd = evbuffer_readln(src, NULL, EVBUFFER_EOL_CRLF);
+
+    if (!cmd) {
+    	WARNING("invalid command\n");
+        goto exit;
+    }
     assert(cmd);
     DEBUG("cmd = %s\n", cmd);
 
@@ -649,7 +778,7 @@ static void client_auth_readcb(struct bufferevent *bev, void *arg)
 		NNTP_AUTH_REQUIRED);
     }
 exit:
-    free(cmd);
+    if (cmd != NULL) free(cmd);
 }
 
 /* handles read event from server during the authentication process */
@@ -683,9 +812,9 @@ static void server_auth_readcb(struct bufferevent *bev, void *arg)
     DEBUG("code = %d, msg = %s\n", code, msg);
 
     if (code == NNTP_AUTH_REQUIRED) {
-	evbuffer_add_printf(dst, "AUTHINFO USER %s\r\n", SERVER_USER);
+	evbuffer_add_printf(dst, "AUTHINFO USER %s\r\n", nntp_server.username);
     } else if (code == NNTP_MORE_AUTH) {
-	evbuffer_add_printf(dst, "AUTHINFO PASS %s\r\n", SERVER_PASS);
+	evbuffer_add_printf(dst, "AUTHINFO PASS %s\r\n", nntp_server.password);
     } else if (code == NNTP_AUTH_ACCEPTED) {
 	DEBUG("got authentication from server\n");
 	conn->status = SERVER_AUTHENTICATED;
@@ -695,7 +824,7 @@ static void server_auth_readcb(struct bufferevent *bev, void *arg)
 	bufferevent_enable(conn->client_bev, EV_READ);
     } else if (code == NNTP_SERVICE_READY) {
 	/* Banner from server */
-	evbuffer_add_printf(dst, "AUTHINFO USER %s\r\n", SERVER_USER);
+	evbuffer_add_printf(dst, "AUTHINFO USER %s\r\n", nntp_server.username);
     }
 
     free(resp);
@@ -746,53 +875,53 @@ static void eventcb(struct bufferevent *bev, short what, void *ctx)
 
     /* TODO : clean this */
     if (what & (BEV_EVENT_EOF|BEV_EVENT_ERROR)) {
-	if (what & BEV_EVENT_ERROR) {
-	    print_openssl_err(bev);
+        if (what & BEV_EVENT_ERROR) {
+            print_openssl_err(bev);
 
-	    ERROR("Error: %s\n", evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
+            ERROR("Error: %s\n", evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
 
-	    err = bufferevent_socket_get_dns_error(bev);
-	    if (err)
-		ERROR("DNS error: %s\n", evutil_gai_strerror(err));
-	}
+            err = bufferevent_socket_get_dns_error(bev);
+            if (err)
+            ERROR("DNS error: %s\n", evutil_gai_strerror(err));
+        }
 
-	if (partner) {
-	    size_t len;
-	    /* Flush all pending data */
-	    len = evbuffer_get_length(bufferevent_get_input(bev));
-	    if (len) {
-		DEBUG("Flushing pending data: %d\n", len);
-		common_readcb(bev, ctx);
-	    }
+        if (partner) {
+            size_t len;
+            /* Flush all pending data */
+            len = evbuffer_get_length(bufferevent_get_input(bev));
+            if (len) {
+            DEBUG("Flushing pending data: %d\n", len);
+            common_readcb(bev, ctx);
+            }
 
-	    len = evbuffer_get_length(bufferevent_get_output(partner));
-	    if (len) {
-		/* We still have to flush data from the other
-		 * side, but when that's done, close the other
-		 * side. */
-		bufferevent_setcb(partner, NULL, close_on_finished_writecb,
-			eventcb, conn);
-		bufferevent_disable(partner, EV_READ);
-	    } else {
-		/* We have nothing left to say to the other
-		 * side; close it. */
-		close_bev(partner, conn);
-	    }
-	}
+            len = evbuffer_get_length(bufferevent_get_output(partner));
+            if (len) {
+            /* We still have to flush data from the other
+             * side, but when that's done, close the other
+             * side. */
+            bufferevent_setcb(partner, NULL, close_on_finished_writecb,
+                eventcb, conn);
+            bufferevent_disable(partner, EV_READ);
+            } else {
+            /* We have nothing left to say to the other
+             * side; close it. */
+            close_bev(partner, conn);
+            }
+        }
 
-	close_bev(bev, conn);
+        close_bev(bev, conn);
     } else if (what & BEV_EVENT_CONNECTED) {
-	if (bev == conn->client_bev) {
-	    DEBUG("client connected, sending banner to client\n");
-	    conn->status = CLIENT_CONNECTED;
-	    dst = bufferevent_get_output(bev);
-	    evbuffer_add_printf(dst, "%d %s\r\n", NNTP_SERVICE_READY, NNTP_BANNER);
-	    //bufferevent_setcb(bev, client_auth_readcb, NULL, eventcb, conn);
-	    //bufferevent_enable(bev, EV_READ);
-	} else {
-	    DEBUG("connected to server, waiting for banner\n");
-	    conn->status = SERVER_CONNECTED;
-	}
+        if (bev == conn->client_bev) {
+            DEBUG("client connected, sending banner to client\n");
+            conn->status = CLIENT_CONNECTED;
+            dst = bufferevent_get_output(bev);
+            evbuffer_add_printf(dst, "%d %s\r\n", NNTP_SERVICE_READY, NNTP_BANNER);
+            //bufferevent_setcb(bev, client_auth_readcb, NULL, eventcb, conn);
+            //bufferevent_enable(bev, EV_READ);
+        } else {
+            DEBUG("connected to server, waiting for banner\n");
+            conn->status = SERVER_CONNECTED;
+        }
     }
 }
 
@@ -842,18 +971,21 @@ err:
 
 int main(int argc, char **argv)
 {
-    char *tmp;
     int socklen;
     struct evconnlistener *listener = NULL;
+    char *configfile = "nntp-proxy.conf";
 
-    if (argc != 5)
-	syntax(argv[0]);
+    //parse args
+    if (argc > 1) {
+        configfile = argv[1];
+    }
 
-    verbose_level = DEBUG_LEVEL;
+    INFO("Loading configuration file: %s\n", configfile);
+    load_config(configfile);
 
-    INFO("Starting proxy ...\n"); 
+    INFO("Starting proxy ...\n");
 
-    ssl_server_ctx = ssl_server_init(argv[1], argv[2]);
+    ssl_server_ctx = ssl_server_init(proxy_server.ssl_key, proxy_server.ssl_cert);
     if (!ssl_server_ctx) {
 	fprintf(stderr, "SSL server init failed\n");
 	exit(EXIT_FAILURE);
@@ -872,25 +1004,15 @@ int main(int argc, char **argv)
     memset(&listen_on_addr, 0, sizeof(listen_on_addr));
     socklen = sizeof(listen_on_addr);
 
-    if (evutil_parse_sockaddr_port(argv[3],
+    char* bind_addr;
+    asprintf(&bind_addr, "%s:%i", proxy_server.bind_ip, proxy_server.port);
+    if (evutil_parse_sockaddr_port(bind_addr,
 		(struct sockaddr *) &listen_on_addr, &socklen) < 0) {
-	syntax(argv[0]);
+		ERROR("Invalid bind IP og port: %s\n", bind_addr);
+		exit(EXIT_FAILURE);
     }
 
-    tmp = strtok(argv[4], ":");
-    if (!tmp) {
-	syntax(argv[0]);
-	exit(EXIT_FAILURE);
-    }
-    server_hostname = tmp;
-    tmp = strtok(NULL, ":");
-    if (!tmp) {
-	syntax(argv[0]);
-	exit(EXIT_FAILURE);
-    }
-    server_port = atoi(tmp);
-
-    connections = calloc(MAX_CONNS, sizeof(struct conn_desc));
+    connections = calloc(nntp_server.max_conns, sizeof(struct conn_desc));
     if (!connections) {
 	perror("calloc");
 	exit(EXIT_FAILURE);
@@ -925,6 +1047,7 @@ int main(int argc, char **argv)
     evconnlistener_free(listener);
     event_base_free(base);
     evdns_base_free(dns_base, 1);
+    free(users);
 
     exit(EXIT_SUCCESS);
 }

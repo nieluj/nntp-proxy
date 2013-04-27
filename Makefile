@@ -1,14 +1,19 @@
+UNAME_S := $(shell uname -s)
+
 CC = gcc
 CFLAGS = -g -c -Wall
-LDFLAGS = -lcrypt 
+
+ifneq ($(UNAME_S),Darwin)
+  LDFLAGS = -lcrypt 
+endif
 
 SOURCES = nntp-proxy.c
 OBJECTS = $(SOURCES:.c=.o)
 
 EXECUTABLE = nntp-proxy
 
-CFLAGS  += `pkg-config --cflags libevent_openssl openssl`
-LDFLAGS += `pkg-config --libs libevent_openssl openssl`
+CFLAGS  += `pkg-config --cflags libevent_openssl openssl libconfig`
+LDFLAGS += `pkg-config --libs libevent_openssl openssl libconfig`
 
 all: $(SOURCES) $(EXECUTABLE)
 
