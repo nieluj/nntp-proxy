@@ -30,7 +30,7 @@ proxy:
 {
     #Local address and port to bind to
     bind_ip = "0.0.0.0";
-    port = 5555;
+    bind_port = 5555;
 
     # SSL key and cert file
     ssl_key = "key.pem";
