@@ -3,7 +3,7 @@ UNAME_S := $(shell uname -s)
 CC = gcc
 CFLAGS = -g -c -Wall
 
-ifeq ($(UNAME_S),Linux)
+ifneq ($(UNAME_S),Darwin)
   LDFLAGS = -lcrypt 
 endif
 
