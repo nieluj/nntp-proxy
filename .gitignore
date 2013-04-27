@@ -1,3 +1,7 @@
+#Idea project files
+.idea
+*.iml
+
 # Object files
 *.o
 
