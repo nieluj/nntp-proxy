@@ -567,7 +567,7 @@ static int load_config(char *file)
 
     setting_proxy_verbose = config_lookup(&cfg, "proxy.verbose");
     setting_proxy_bind_ip = config_lookup(&cfg, "proxy.bind_ip");
-    setting_proxy_port = config_lookup(&cfg, "proxy.port");
+    setting_proxy_port = config_lookup(&cfg, "proxy.bind_port");
     setting_proxy_ssl_key = config_lookup(&cfg, "proxy.ssl_key");
     setting_proxy_ssl_cert = config_lookup(&cfg, "proxy.ssl_cert");
     setting_proxy_users = config_lookup(&cfg, "proxy.users");
