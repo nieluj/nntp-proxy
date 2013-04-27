@@ -1008,7 +1008,7 @@ int main(int argc, char **argv)
     asprintf(&bind_addr, "%s:%i", proxy_server.bind_ip, proxy_server.port);
     if (evutil_parse_sockaddr_port(bind_addr,
 		(struct sockaddr *) &listen_on_addr, &socklen) < 0) {
-		ERROR("Invalid bind IP og port: %s\n", bind_addr);
+		ERROR("Invalid bind IP or port: %s\n", bind_addr);
 		exit(EXIT_FAILURE);
     }
 
