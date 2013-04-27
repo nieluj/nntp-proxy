@@ -98,7 +98,7 @@ $ openssl x509 -req -days 365 -in cert.req -signkey key.pem -out cert.pem
 
 ## Usage
 
-`nntp-proxy [<config file>]'
+`nntp-proxy [<config file>]`
 
   * `config file` : Configuration file (See nntp-proxy.conf.example)
 
