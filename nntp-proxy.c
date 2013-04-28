@@ -302,9 +302,9 @@ static char *ip_str_from_sa(const struct sockaddr *sa)
 static void syntax(const char *binpath)
 {
     fprintf(stderr, "Syntax:\n");
-    fprintf(stderr, "\t%s <keypath> <certpath> <listen-on-addr> <connect-to-addr>\n", binpath);
+    fprintf(stderr, "\t%s [<config file>]\n", binpath);
     fprintf(stderr, "Example:\n");
-    fprintf(stderr, "\t%s key.pem cert.pem 0.0.0.0:563 ssl-eu.astraweb.com:443\n", binpath);
+    fprintf(stderr, "\t%s nntp-proxy.conf\n", binpath);
 
     exit(EXIT_FAILURE);
 }
@@ -976,7 +976,10 @@ int main(int argc, char **argv)
     char *configfile = "nntp-proxy.conf";
 
     //parse args
-    if (argc > 1) {
+    if (argc > 2) {
+        syntax(argv[0]);
+        exit(EXIT_FAILURE);
+    } else if(argc > 1) {
         configfile = argv[1];
     }
 
