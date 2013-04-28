@@ -621,7 +621,11 @@ static int load_config(char *file)
       for(i = 0; i < user_count; i++) {
           config_setting_t *user = config_setting_get_elem(setting_proxy_users, i);
           const char *username, *password;
+          #ifdef __APPLE__
+	      int max_conns;
+	      #else
 	      long int max_conns;
+	      #endif
 
 	      if(!(config_setting_lookup_string(user, "username", &username)
 	           && config_setting_lookup_string(user, "password", &password)
