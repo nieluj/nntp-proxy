@@ -89,7 +89,7 @@ struct proxy_info proxy_server;
 #define INFO_LEVEL    3
 #define DEBUG_LEVEL   4
 
-#define PRINT_MSG(level, fmt, ...) print_msg(ERROR_LEVEL, "[%s:%d] " fmt, __PRETTY_FUNCTION__, __LINE__, ## __VA_ARGS__)
+#define PRINT_MSG(level, fmt, ...) print_msg(level, "[%s:%d] " fmt, __PRETTY_FUNCTION__, __LINE__, ## __VA_ARGS__)
 
 #define ERROR(fmt, ...)   PRINT_MSG(ERROR_LEVEL, fmt, ## __VA_ARGS__)
 #define WARNING(fmt, ...) PRINT_MSG(WARNING_LEVEL, fmt, ## __VA_ARGS__)
