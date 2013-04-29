@@ -621,8 +621,10 @@ static int load_config(char *file)
       for(i = 0; i < user_count; i++) {
           config_setting_t *user = config_setting_get_elem(setting_proxy_users, i);
           const char *username, *password;
-          #ifdef __APPLE__
-	      int max_conns;
+          #if (((LIBCONFIG_VER_MAJOR == 1) && (LIBCONFIG_VER_MINOR >= 4)) \
+               || (LIBCONFIG_VER_MAJOR > 1))
+               //DAHH libconfig changed from long int to int type in 1.4+
+          int max_conns;
 	      #else
 	      long int max_conns;
 	      #endif
