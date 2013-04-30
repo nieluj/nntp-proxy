@@ -12,6 +12,8 @@ OBJECTS = $(SOURCES:.c=.o)
 
 EXECUTABLE = nntp-proxy
 
+INSTALL_DIR = /usr/local/bin
+
 CFLAGS  += `pkg-config --cflags libevent_openssl openssl libconfig`
 LDFLAGS += `pkg-config --libs libevent_openssl openssl libconfig`
 
@@ -22,6 +24,9 @@ $(EXECUTABLE): $(OBJECTS)
 
 .c.o:
 	$(CC) $(CFLAGS) $< -o $@
+
+install: all
+	/usr/bin/install -c -p -m 755 $(EXECUTABLE) $(INSTALL_DIR)
 
 clean:
 	rm $(OBJECTS) $(EXECUTABLE)

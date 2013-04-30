@@ -89,7 +89,7 @@ struct proxy_info proxy_server;
 #define INFO_LEVEL    3
 #define DEBUG_LEVEL   4
 
-#define PRINT_MSG(level, fmt, ...) print_msg(ERROR_LEVEL, "[%s:%d] " fmt, __PRETTY_FUNCTION__, __LINE__, ## __VA_ARGS__)
+#define PRINT_MSG(level, fmt, ...) print_msg(level, "[%s:%d] " fmt, __PRETTY_FUNCTION__, __LINE__, ## __VA_ARGS__)
 
 #define ERROR(fmt, ...)   PRINT_MSG(ERROR_LEVEL, fmt, ## __VA_ARGS__)
 #define WARNING(fmt, ...) PRINT_MSG(WARNING_LEVEL, fmt, ## __VA_ARGS__)
@@ -302,9 +302,9 @@ static char *ip_str_from_sa(const struct sockaddr *sa)
 static void syntax(const char *binpath)
 {
     fprintf(stderr, "Syntax:\n");
-    fprintf(stderr, "\t%s <keypath> <certpath> <listen-on-addr> <connect-to-addr>\n", binpath);
+    fprintf(stderr, "\t%s [<config file>]\n", binpath);
     fprintf(stderr, "Example:\n");
-    fprintf(stderr, "\t%s key.pem cert.pem 0.0.0.0:563 ssl-eu.astraweb.com:443\n", binpath);
+    fprintf(stderr, "\t%s nntp-proxy.conf\n", binpath);
 
     exit(EXIT_FAILURE);
 }
@@ -621,7 +621,13 @@ static int load_config(char *file)
       for(i = 0; i < user_count; i++) {
           config_setting_t *user = config_setting_get_elem(setting_proxy_users, i);
           const char *username, *password;
+          #if (((LIBCONFIG_VER_MAJOR == 1) && (LIBCONFIG_VER_MINOR >= 4)) \
+               || (LIBCONFIG_VER_MAJOR > 1))
+               //DAHH libconfig changed from long int to int type in 1.4+
+          int max_conns;
+	      #else
 	      long int max_conns;
+	      #endif
 
 	      if(!(config_setting_lookup_string(user, "username", &username)
 	           && config_setting_lookup_string(user, "password", &password)
@@ -976,7 +982,10 @@ int main(int argc, char **argv)
     char *configfile = "nntp-proxy.conf";
 
     //parse args
-    if (argc > 1) {
+    if (argc > 2) {
+        syntax(argv[0]);
+        exit(EXIT_FAILURE);
+    } else if(argc > 1) {
         configfile = argv[1];
     }
 
@@ -1008,7 +1017,7 @@ int main(int argc, char **argv)
     asprintf(&bind_addr, "%s:%i", proxy_server.bind_ip, proxy_server.port);
     if (evutil_parse_sockaddr_port(bind_addr,
 		(struct sockaddr *) &listen_on_addr, &socklen) < 0) {
-		ERROR("Invalid bind IP og port: %s\n", bind_addr);
+		ERROR("Invalid bind IP or port: %s\n", bind_addr);
 		exit(EXIT_FAILURE);
     }
 
