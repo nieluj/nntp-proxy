@@ -36,6 +36,9 @@ proxy:
     ssl_key = "key.pem";
     ssl_cert = "cert.pem";
 
+    # prohibit users from posting
+    prohibit_posting = false;
+
     # Verbose levels: ERROR, WARNING, NOTICE, INFO, DEBUG
     verbose = "INFO";
 

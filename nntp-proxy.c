@@ -57,6 +57,7 @@ struct user_info {
 struct proxy_info {
     const char *bind_ip;
     int port;
+    int prohibit_post;
     const char *ssl_key;
     const char *ssl_cert;
 };
@@ -75,8 +76,10 @@ struct proxy_info proxy_server;
 /** end of configuration **/
 
 #define NNTP_SERVICE_READY 200
+#define NNTP_SERVICE_READY_PROHIBIT_POSTING 201
 #define NNTP_AUTH_ACCEPTED 281
 #define NNTP_MORE_AUTH     381
+#define NNTP_POSTING_PROHIBITED 440
 #define NNTP_AUTH_REQUIRED 480
 #define NNTP_AUTH_REJECTED 482
 #define NNTP_NO_PERM       502
@@ -518,7 +521,12 @@ static void common_readcb(struct bufferevent *bev, void *arg)
 	            evbuffer_add_printf(dst, "AUTHINFO USER %s\r\n", nntp_server.username);
             } else if (strcasestr(cmd, "AUTHINFO PASS")) {
 	            evbuffer_add_printf(dst, "AUTHINFO PASS %s\r\n", nntp_server.password);
+            } else if (proxy_server.prohibit_post && strcasestr(cmd, "POST")) {
+                DEBUG("[%d] command send to client: %d Posting not permitted\n", conn->n, NNTP_POSTING_PROHIBITED);
+                dst = bufferevent_get_output(bev);
+                evbuffer_add_printf(dst, "%d Posting not permitted\r\n", NNTP_POSTING_PROHIBITED);
             } else {
+                DEBUG("[%d] command send to server: %s\n", conn->n, cmd);
                 evbuffer_add_printf(dst, "%s\r\n", cmd);
             }
             free(cmd);
@@ -558,7 +566,7 @@ static int load_config(char *file)
   else
   {
     config_setting_t *setting_max_connections, *setting_username, *setting_password, *setting_server, *setting_port = NULL;
-    config_setting_t *setting_proxy_bind_ip, *setting_proxy_port, *setting_proxy_users, *setting_proxy_ssl_key, *setting_proxy_ssl_cert, *setting_proxy_verbose = NULL;
+    config_setting_t *setting_proxy_bind_ip, *setting_proxy_port, *setting_proxy_users, *setting_proxy_ssl_key, *setting_proxy_prohibit_post, *setting_proxy_ssl_cert, *setting_proxy_verbose = NULL;
     setting_max_connections = config_lookup(&cfg, "nntp_server.max_connections");
     setting_username = config_lookup(&cfg, "nntp_server.username");
     setting_password = config_lookup(&cfg, "nntp_server.password");
@@ -568,11 +576,12 @@ static int load_config(char *file)
     setting_proxy_verbose = config_lookup(&cfg, "proxy.verbose");
     setting_proxy_bind_ip = config_lookup(&cfg, "proxy.bind_ip");
     setting_proxy_port = config_lookup(&cfg, "proxy.bind_port");
+    setting_proxy_prohibit_post = config_lookup(&cfg, "proxy.prohibit_posting");
     setting_proxy_ssl_key = config_lookup(&cfg, "proxy.ssl_key");
     setting_proxy_ssl_cert = config_lookup(&cfg, "proxy.ssl_cert");
     setting_proxy_users = config_lookup(&cfg, "proxy.users");
 
-    if(!setting_max_connections || !setting_username || !setting_password || !setting_server || !setting_port ||
+    if(!setting_max_connections || !setting_username || !setting_password || !setting_server || !setting_port || !setting_proxy_prohibit_post ||
        !setting_proxy_bind_ip || !setting_proxy_port || !setting_proxy_ssl_key || !setting_proxy_ssl_cert || !setting_proxy_users) {
       ERROR("Something went wrong while reading the config file! Are all required fields available?\n");
       exit(EXIT_FAILURE);
@@ -605,14 +614,15 @@ static int load_config(char *file)
 
       proxy_server.bind_ip = strdup(config_setting_get_string(setting_proxy_bind_ip));
       proxy_server.port = config_setting_get_int(setting_proxy_port);
+      proxy_server.prohibit_post = config_setting_get_bool(setting_proxy_prohibit_post);
       proxy_server.ssl_key = strdup(config_setting_get_string(setting_proxy_ssl_key));
       proxy_server.ssl_cert = strdup(config_setting_get_string(setting_proxy_ssl_cert));
 
-      DEBUG("loaded settings from file...\nNNTP server: %s:%i\nmax_conns: %i\nusername: %s\npassword: %s\nProxy server: %s:%i\nSSL key: %s\nSSL cert: %s\n",
+      DEBUG("loaded settings from file...\nNNTP server: %s:%i\nmax_conns: %i\nusername: %s\npassword: %s\nProxy server: %s:%i\nSSL key: %s\nSSL cert: %s\nProhibit posting: %s\n",
         nntp_server.server, nntp_server.port,
         nntp_server.max_conns, nntp_server.username, nntp_server.password,
         proxy_server.bind_ip, proxy_server.port,
-        proxy_server.ssl_key, proxy_server.ssl_cert);
+        proxy_server.ssl_key, proxy_server.ssl_cert, proxy_server.prohibit_post ? "true" : "false");
 
       user_count = config_setting_length(setting_proxy_users);
       DEBUG("Users: %i\n", user_count);
@@ -828,7 +838,7 @@ static void server_auth_readcb(struct bufferevent *bev, void *arg)
 	bufferevent_setcb(conn->server_bev, common_readcb, NULL, eventcb, conn);
 	bufferevent_setcb(conn->client_bev, common_readcb, NULL, eventcb, conn);
 	bufferevent_enable(conn->client_bev, EV_READ);
-    } else if (code == NNTP_SERVICE_READY) {
+    } else if (code == NNTP_SERVICE_READY || code == NNTP_SERVICE_READY_PROHIBIT_POSTING) {
 	/* Banner from server */
 	evbuffer_add_printf(dst, "AUTHINFO USER %s\r\n", nntp_server.username);
     }
@@ -921,7 +931,10 @@ static void eventcb(struct bufferevent *bev, short what, void *ctx)
             DEBUG("client connected, sending banner to client\n");
             conn->status = CLIENT_CONNECTED;
             dst = bufferevent_get_output(bev);
-            evbuffer_add_printf(dst, "%d %s\r\n", NNTP_SERVICE_READY, NNTP_BANNER);
+            if (proxy_server.prohibit_post)
+                evbuffer_add_printf(dst, "%d %s\r\n", NNTP_SERVICE_READY_PROHIBIT_POSTING, NNTP_BANNER);
+            else
+                evbuffer_add_printf(dst, "%d %s %s\r\n", NNTP_SERVICE_READY, NNTP_BANNER, "(posting ok)");
             //bufferevent_setcb(bev, client_auth_readcb, NULL, eventcb, conn);
             //bufferevent_enable(bev, EV_READ);
         } else {
