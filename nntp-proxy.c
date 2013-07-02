@@ -525,6 +525,12 @@ static void common_readcb(struct bufferevent *bev, void *arg)
                 DEBUG("[%d] command send to client: %d Posting not permitted\n", conn->n, NNTP_POSTING_PROHIBITED);
                 dst = bufferevent_get_output(bev);
                 evbuffer_add_printf(dst, "%d Posting not permitted\r\n", NNTP_POSTING_PROHIBITED);
+            } else if (strcasestr(cmd, "MODE READER")) {
+                dst = bufferevent_get_output(bev);
+                if (proxy_server.prohibit_post)
+                    evbuffer_add_printf(dst, "%d %s %s\r\n", NNTP_SERVICE_READY_PROHIBIT_POSTING, NNTP_BANNER, "(posting prohibited)");
+                else
+                    evbuffer_add_printf(dst, "%d %s %s\r\n", NNTP_SERVICE_READY, NNTP_BANNER, "(posting ok)");
             } else {
                 DEBUG("[%d] command send to server: %s\n", conn->n, cmd);
                 evbuffer_add_printf(dst, "%s\r\n", cmd);
@@ -932,7 +938,7 @@ static void eventcb(struct bufferevent *bev, short what, void *ctx)
             conn->status = CLIENT_CONNECTED;
             dst = bufferevent_get_output(bev);
             if (proxy_server.prohibit_post)
-                evbuffer_add_printf(dst, "%d %s\r\n", NNTP_SERVICE_READY_PROHIBIT_POSTING, NNTP_BANNER);
+                evbuffer_add_printf(dst, "%d %s %s\r\n", NNTP_SERVICE_READY_PROHIBIT_POSTING, NNTP_BANNER, "(posting prohibited)");
             else
                 evbuffer_add_printf(dst, "%d %s %s\r\n", NNTP_SERVICE_READY, NNTP_BANNER, "(posting ok)");
             //bufferevent_setcb(bev, client_auth_readcb, NULL, eventcb, conn);
