@@ -521,7 +521,7 @@ static void common_readcb(struct bufferevent *bev, void *arg)
 	            evbuffer_add_printf(dst, "AUTHINFO USER %s\r\n", nntp_server.username);
             } else if (strcasestr(cmd, "AUTHINFO PASS")) {
 	            evbuffer_add_printf(dst, "AUTHINFO PASS %s\r\n", nntp_server.password);
-            } else if (proxy_server.prohibit_post && strcasestr(cmd, "POST")) {
+            } else if (proxy_server.prohibit_post && strcasestr(cmd, "POST")==cmd) {
                 DEBUG("[%d] command send to client: %d Posting not permitted\n", conn->n, NNTP_POSTING_PROHIBITED);
                 dst = bufferevent_get_output(bev);
                 evbuffer_add_printf(dst, "%d Posting not permitted\r\n", NNTP_POSTING_PROHIBITED);
