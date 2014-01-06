@@ -11,6 +11,7 @@
 
 #define _GNU_SOURCE
 
+#include <signal.h>
 #include <stdio.h>
 #include <assert.h>
 #include <stdlib.h>
@@ -994,6 +995,25 @@ err:
     evutil_closesocket(sock);
 }
 
+static void ignore_sigpipe(void)
+{
+        // ignore SIGPIPE (or else it will bring our program down if the client
+        // closes its socket).
+        // NB: if running under gdb, you might need to issue this gdb command:
+        //          handle SIGPIPE nostop noprint pass
+        //     because, by default, gdb will stop our program execution (which we
+        //     might not want).
+        struct sigaction sa;
+ 
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = SIG_IGN;
+ 
+        if (sigemptyset(&sa.sa_mask) < 0 || sigaction(SIGPIPE, &sa, 0) < 0) {
+                perror("Could not ignore the SIGPIPE signal");
+                exit(EXIT_FAILURE);
+        }
+}
+
 int main(int argc, char **argv)
 {
     int socklen;
@@ -1010,6 +1030,8 @@ int main(int argc, char **argv)
 
     INFO("Loading configuration file: %s\n", configfile);
     load_config(configfile);
+
+    ignore_sigpipe();
 
     INFO("Starting proxy ...\n");
 
