@@ -22,6 +22,7 @@ proxy:
     prohibit_posting = false;
     # Verbose levels: ERROR, WARNING, NOTICE, INFO, DEBUG
     verbose = "INFO";
+    daemonize = false;
 
     # Password is made with: 'mkpasswd -m sha-512 <password>'
     # mkpasswd is found in whois package on Debian-based systems
