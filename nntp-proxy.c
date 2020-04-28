@@ -134,7 +134,7 @@ struct conn_desc {
     char *client_username;
     /* number of the connection */
     int n;
-
+    char *client_ip;
     struct timeval last_cmd;
     size_t bytes;   
 };
@@ -232,13 +232,13 @@ static int allow_connection(const char *username)
 	}
 	user++;
     }
+    conn = connections;
 
     if (user->username == NULL) {
-	WARNING("user info not found for username %s\n", username);
+	WARNING("user info not found for username %s from IP %s\n", username, conn->client_ip);
 	return -1;
     }
 
-    conn = connections;
     for (i = 0; i < nntp_server.max_conns; i++) {
 	if (conn->client_username &&
 		!strcmp(conn->client_username, username)) {
@@ -802,7 +802,7 @@ static void client_auth_readcb(struct bufferevent *bev, void *arg)
 	}
 
 	if (authenticate(conn->client_username, cmd_args[2]) == -1) {
-	    WARNING("Authentication failed for username %s\n", conn->client_username);
+	    WARNING("Authentication failed for username %s from IP %s\n", conn->client_username, conn->client_ip);
 	    evbuffer_add_printf(dst, "%d Wrong username or password\r\n",
 		    NNTP_AUTH_REJECTED);
 	    goto exit;
@@ -977,7 +977,6 @@ static void ssl_accept_cb(struct evconnlistener *listener, evutil_socket_t sock,
 {
     SSL *ssl;
     struct conn_desc *conn;
-
     INFO("new connection from %s\n", ip_str_from_sa(sa));
 
     conn = get_next_conn();
@@ -988,7 +987,7 @@ static void ssl_accept_cb(struct evconnlistener *listener, evutil_socket_t sock,
 
     conn->status = CLIENT_CONNECTING;
     assert(conn->client_username == NULL);
-
+    conn->client_ip = ip_str_from_sa(sa);
     ssl = SSL_new(ssl_server_ctx);
     if (!ssl) {
 	ERROR("Error creating SSL server side\n");
