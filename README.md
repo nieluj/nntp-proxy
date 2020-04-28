@@ -24,6 +24,8 @@ nntp_server:
     password = "changeme";
     # Maximum number of connections allowed by the NNTP
     max_connections = 20;
+    # Do you want to use SSL to connect to your server?
+    ssl = true;
 };
 
 proxy:
