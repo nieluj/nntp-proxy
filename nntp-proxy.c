@@ -1,7 +1,8 @@
 /*
  * This file is part of the nntp proxy project
  * Copyright (C) 2015 Julien Perrot
- *
+ * Modified by tombii 2020 to include support for non-SSL servers
+
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -50,6 +51,7 @@ struct server_info {
     const char *username;
     const char *password;
     int max_conns;
+    int ssl;
 };
 
 struct user_info {
@@ -132,7 +134,7 @@ struct conn_desc {
     char *client_username;
     /* number of the connection */
     int n;
-
+    char *client_ip;
     struct timeval last_cmd;
     size_t bytes;   
 };
@@ -230,13 +232,13 @@ static int allow_connection(const char *username)
 	}
 	user++;
     }
+    conn = connections;
 
     if (user->username == NULL) {
-	WARNING("user info not found for username %s\n", username);
+	WARNING("user info not found for username %s from IP %s\n", username, conn->client_ip);
 	return -1;
     }
 
-    conn = connections;
     for (i = 0; i < nntp_server.max_conns; i++) {
 	if (conn->client_username &&
 		!strcmp(conn->client_username, username)) {
@@ -359,7 +361,7 @@ static SSL_CTX * ssl_server_init(const char *keypath, const char *certpath)
 	return NULL;
     }
 
-    SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2);
+    SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv3);
     if (use_padlock_engine == 1) {
 	if (SSL_CTX_set_cipher_list(ctx, "AES+SHA") != 1) {
 	    fprintf(stderr, "Error setting client cipher list\n");
@@ -373,7 +375,7 @@ static SSL_CTX * ssl_client_init(void)
 {
     SSL_CTX *ctx = SSL_CTX_new(SSLv23_client_method());
 
-    SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2);
+    SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv3);
     if (use_padlock_engine == 1) {
 	if (SSL_CTX_set_cipher_list(ctx, "AES+SHA") != 1) {
 	    fprintf(stderr, "Error setting client cipher list\n");
@@ -404,6 +406,8 @@ static void close_client(struct conn_desc *conn)
     if (conn->client_username) {
 	free(conn->client_username);
 	conn->client_username = NULL;
+	free(conn->client_ip);
+	conn->client_ip = NULL;
     }
 }
 
@@ -428,6 +432,8 @@ static void close_server(struct conn_desc *conn)
     if (conn->client_username) {
 	free(conn->client_username);
 	conn->client_username = NULL;
+	free(conn->client_ip);
+	conn->client_ip = NULL;
     }
 }
 
@@ -580,7 +586,8 @@ static int load_config(char *file) {
     }
 
     config_setting_t *setting_max_connections, *setting_username, *setting_password, *setting_server, *setting_port = NULL;
-    config_setting_t *setting_proxy_bind_ip, *setting_proxy_port, *setting_proxy_users, *setting_proxy_ssl_key, 
+    config_setting_t *setting_ssl = NULL;
+    config_setting_t *setting_proxy_bind_ip, *setting_proxy_port, *setting_proxy_users, *setting_proxy_ssl_key,
 		     *setting_proxy_prohibit_post, *setting_proxy_daemonize, *setting_proxy_ssl_cert, *setting_proxy_verbose = NULL;
 
     setting_max_connections = config_lookup(&cfg, "nntp_server.max_connections");
@@ -588,6 +595,7 @@ static int load_config(char *file) {
     setting_password = config_lookup(&cfg, "nntp_server.password");
     setting_server = config_lookup(&cfg, "nntp_server.server");
     setting_port = config_lookup(&cfg, "nntp_server.port");
+    setting_ssl = config_lookup(&cfg, "nntp_server.ssl");
 
     setting_proxy_verbose = config_lookup(&cfg, "proxy.verbose");
     setting_proxy_bind_ip = config_lookup(&cfg, "proxy.bind_ip");
@@ -598,7 +606,7 @@ static int load_config(char *file) {
     setting_proxy_ssl_cert = config_lookup(&cfg, "proxy.ssl_cert");
     setting_proxy_users = config_lookup(&cfg, "proxy.users");
 
-    if(!setting_max_connections || !setting_username || !setting_password || !setting_server || !setting_port || !setting_proxy_prohibit_post ||
+    if(!setting_max_connections || !setting_username || !setting_password || !setting_server || !setting_port || !setting_ssl || !setting_proxy_prohibit_post ||
 	    !setting_proxy_bind_ip || !setting_proxy_port || !setting_proxy_ssl_key || !setting_proxy_ssl_cert || !setting_proxy_users) {
 	fprintf(stderr, "Something went wrong while reading the config file! Are all required fields available?\n");
 	exit(EXIT_FAILURE);
@@ -626,6 +634,7 @@ static int load_config(char *file) {
     nntp_server.max_conns = config_setting_get_int(setting_max_connections);
     nntp_server.username = strdup(config_setting_get_string(setting_username));
     nntp_server.password = strdup(config_setting_get_string(setting_password));
+    nntp_server.ssl = config_setting_get_bool(setting_ssl);
 
     proxy_server.bind_ip = strdup(config_setting_get_string(setting_proxy_bind_ip));
     proxy_server.port = config_setting_get_int(setting_proxy_port);
@@ -634,8 +643,8 @@ static int load_config(char *file) {
     proxy_server.ssl_key = strdup(config_setting_get_string(setting_proxy_ssl_key));
     proxy_server.ssl_cert = strdup(config_setting_get_string(setting_proxy_ssl_cert));
 
-    DEBUG("loaded settings from file...\nNNTP server: %s:%i\nmax_conns: %i\nusername: %s\npassword: %s\nProxy server: %s:%i\nSSL key: %s\nSSL cert: %s\nProhibit posting: %s\n",
-	    nntp_server.server, nntp_server.port,
+    DEBUG("loaded settings from file...\nNNTP server: %s:%i\nUse SSL:%i\nmax_conns: %i\nusername: %s\npassword: %s\nProxy server: %s:%i\nSSL key: %s\nSSL cert: %s\nProhibit posting: %s\n",
+	    nntp_server.server, nntp_server.port, nntp_server.ssl,
 	    nntp_server.max_conns, nntp_server.username, nntp_server.password,
 	    proxy_server.bind_ip, proxy_server.port,
 	    proxy_server.ssl_key, proxy_server.ssl_cert, proxy_server.prohibit_post ? "true" : "false");
@@ -695,18 +704,27 @@ static int authenticate(const char *username, const char *password)
 
 static int connect_to_server(struct conn_desc *conn)
 {
-    SSL *ssl;
-
     conn->status = SERVER_CONNECTING;
-    ssl = SSL_new(ssl_client_ctx);
-    assert(ssl);
+    if (nntp_server.ssl) {
+	SSL *ssl;
 
-    conn->server_bev = bufferevent_openssl_socket_new(base, -1, ssl,
+	ssl = SSL_new(ssl_client_ctx);
+	assert(ssl);
+
+	conn->server_bev = bufferevent_openssl_socket_new(base, -1, ssl,
 	    BUFFEREVENT_SSL_CONNECTING,
 	    BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
-    if (!conn->server_bev) {
-	perror("bufferevent_openssl_socket_new");
-	return -1;
+	if (!conn->server_bev) {
+	    perror("bufferevent_openssl_socket_new");
+	    return -1;
+	}
+    } else {
+	conn->server_bev = bufferevent_socket_new(base, -1,
+	    BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
+	if (!conn->server_bev) {
+	    perror("bufferevent_socket_new");
+	    return -1;
+	}
     }
 
     INFO("Connecting to %s port %d\n", nntp_server.server, nntp_server.port);
@@ -788,7 +806,7 @@ static void client_auth_readcb(struct bufferevent *bev, void *arg)
 	}
 
 	if (authenticate(conn->client_username, cmd_args[2]) == -1) {
-	    WARNING("Authentication failed for username %s\n", conn->client_username);
+	    WARNING("Authentication failed for username %s from IP %s\n", conn->client_username, conn->client_ip);
 	    evbuffer_add_printf(dst, "%d Wrong username or password\r\n",
 		    NNTP_AUTH_REJECTED);
 	    goto exit;
@@ -963,7 +981,6 @@ static void ssl_accept_cb(struct evconnlistener *listener, evutil_socket_t sock,
 {
     SSL *ssl;
     struct conn_desc *conn;
-
     INFO("new connection from %s\n", ip_str_from_sa(sa));
 
     conn = get_next_conn();
@@ -974,7 +991,7 @@ static void ssl_accept_cb(struct evconnlistener *listener, evutil_socket_t sock,
 
     conn->status = CLIENT_CONNECTING;
     assert(conn->client_username == NULL);
-
+    conn->client_ip = ip_str_from_sa(sa);
     ssl = SSL_new(ssl_server_ctx);
     if (!ssl) {
 	ERROR("Error creating SSL server side\n");

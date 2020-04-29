@@ -11,6 +11,7 @@ nntp_server:
     username = "changeme";
     password = "changeme";
     max_connections = 20;
+    ssl = true;
 };
 
 proxy:
